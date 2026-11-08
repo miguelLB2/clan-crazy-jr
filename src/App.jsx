@@ -148,6 +148,7 @@ export default function App() {
 
             <WeeklyHonors 
               currentWeek={currentWeek} 
+              weeks={weeks}
               members={members} 
             />
 

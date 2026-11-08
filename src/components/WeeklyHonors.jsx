@@ -1,17 +1,121 @@
-import React, { useState } from 'react';
-import { Trophy, Medal, Search, Flame, Crown, Copy, Check, Shield } from 'lucide-react';
+import React, { useState, useMemo } from 'react';
+import { Trophy, Medal, Search, Flame, Crown, Copy, Check, Shield, Calendar, Sparkles, ChevronDown } from 'lucide-react';
 
-export default function WeeklyHonors({ currentWeek, members }) {
+export default function WeeklyHonors({ currentWeek, weeks = [], members = [] }) {
+  const [viewMode, setViewMode] = useState('semanal'); // 'semanal' | 'mensual'
+  const [selectedMonthKey, setSelectedMonthKey] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
   const [copiedId, setCopiedId] = useState(null);
 
   // Mapa de miembros para obtener Free Fire ID y Rol rápidamente
-  const memberMap = new Map((members || []).map(m => [m.id, m]));
+  const memberMap = useMemo(() => {
+    return new Map((members || []).filter(Boolean).map(m => [m.id, m]));
+  }, [members]);
 
-  const records = Array.isArray(currentWeek?.records) ? currentWeek.records : [];
+  const monthNames = [
+    'Enero', 'Febrero', 'Marzo', 'Abril', 'Mayo', 'Junio',
+    'Julio', 'Agosto', 'Septiembre', 'Octubre', 'Noviembre', 'Diciembre'
+  ];
+
+  // Helper para extraer YYYY-MM de una semana
+  const getWeekMonthKey = (w) => {
+    if (w?.startDate && typeof w.startDate === 'string' && w.startDate.length >= 7) {
+      return w.startDate.substring(0, 7);
+    }
+    if (w?.start_date && typeof w.start_date === 'string' && w.start_date.length >= 7) {
+      return w.start_date.substring(0, 7);
+    }
+    if (w?.created_at && typeof w.created_at === 'string') {
+      return w.created_at.substring(0, 7);
+    }
+    const now = new Date();
+    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+  };
+
+  // Extraer meses disponibles únicos a partir de las semanas
+  const availableMonths = useMemo(() => {
+    const map = new Map();
+    (weeks || []).filter(Boolean).forEach(w => {
+      const key = getWeekMonthKey(w);
+      const parts = key.split('-');
+      if (parts.length >= 2) {
+        const y = parseInt(parts[0], 10);
+        const m = parseInt(parts[1], 10);
+        const label = `${monthNames[m - 1] || 'Mes ' + m} ${y}`;
+        if (!map.has(key)) {
+          map.set(key, { key, label, year: y, month: m });
+        }
+      }
+    });
+
+    if (map.size === 0) {
+      const now = new Date();
+      const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+      map.set(key, { key, label: `${monthNames[now.getMonth()]} ${now.getFullYear()}`, year: now.getFullYear(), month: now.getMonth() + 1 });
+    }
+
+    return Array.from(map.values()).sort((a, b) => b.key.localeCompare(a.key));
+  }, [weeks]);
+
+  const activeMonthKey = selectedMonthKey || (availableMonths[0]?.key || '');
+  const activeMonthObj = availableMonths.find(m => m.key === activeMonthKey) || availableMonths[0];
+
+  // Semanas correspondientes al mes activo
+  const weeksInActiveMonth = useMemo(() => {
+    return (weeks || []).filter(Boolean).filter(w => getWeekMonthKey(w) === activeMonthKey);
+  }, [weeks, activeMonthKey]);
+
+  // Cálculo acumulado mensual (suma de todas las semanas del mes por miembro)
+  const monthlyRecords = useMemo(() => {
+    const totals = new Map();
+
+    // Inicializar todos los miembros del clan con 0
+    (members || []).filter(Boolean).forEach(m => {
+      totals.set(m.id, {
+        memberId: m.id,
+        memberName: m.name,
+        honors: 0,
+        weeksCount: 0
+      });
+    });
+
+    // Sumar los honores de cada semana del mes seleccionado
+    weeksInActiveMonth.forEach(w => {
+      const recs = Array.isArray(w.records) ? w.records : [];
+      recs.forEach(r => {
+        if (!r || !r.memberId) return;
+        if (!totals.has(r.memberId)) {
+          totals.set(r.memberId, {
+            memberId: r.memberId,
+            memberName: r.memberName || 'Miembro',
+            honors: 0,
+            weeksCount: 0
+          });
+        }
+        const item = totals.get(r.memberId);
+        const val = Number(r.honors) || 0;
+        item.honors += val;
+        if (val > 0) {
+          item.weeksCount += 1;
+        }
+      });
+    });
+
+    return Array.from(totals.values()).sort((a, b) => b.honors - a.honors);
+  }, [members, weeksInActiveMonth]);
+
+  // Registros según el modo seleccionado
+  const recordsToDisplay = viewMode === 'mensual'
+    ? monthlyRecords
+    : (Array.isArray(currentWeek?.records) ? currentWeek.records : []);
+
+  // Total acumulado del clan
+  const totalClanHonors = useMemo(() => {
+    return recordsToDisplay.reduce((acc, r) => acc + (Number(r.honors) || 0), 0);
+  }, [recordsToDisplay]);
 
   // Filtrar por término de búsqueda
-  const filteredRecords = records.filter(r => {
+  const filteredRecords = recordsToDisplay.filter(r => {
     if (!r) return false;
     const member = memberMap.get(r.memberId);
     const search = searchTerm.toLowerCase();
@@ -76,38 +180,112 @@ export default function WeeklyHonors({ currentWeek, members }) {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         
         {/* Cabecera de la sección */}
-        <div className="flex flex-col md:flex-row md:items-end justify-between mb-8 gap-4">
+        <div className="flex flex-col lg:flex-row lg:items-end justify-between mb-8 gap-5">
           <div>
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-clan-orange/10 border border-clan-orange/30 text-clan-orange text-xs font-rajdhani font-bold uppercase tracking-widest mb-2">
               <Flame className="w-3.5 h-3.5 text-clan-red" /> Tabla de Clasificación
             </div>
             <h2 className="text-2xl sm:text-4xl font-orbitron font-black text-white">
-              Honores de la Semana
+              {viewMode === 'mensual' ? 'Honores del Mes' : 'Honores de la Semana'}
             </h2>
             <p className="text-sm font-rajdhani text-slate-400 font-semibold mt-1">
-              {currentWeek?.title || "Semana actual activa"}
+              {viewMode === 'mensual'
+                ? `Acumulado total de ${activeMonthObj?.label} (${weeksInActiveMonth.length} semanas sumadas)`
+                : (currentWeek?.title || 'Semana actual activa')}
             </p>
           </div>
 
-          {/* Buscador de miembros */}
-          <div className="relative w-full md:w-72">
-            <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
-            <input
-              type="text"
-              placeholder="Buscar por apodo o ID..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full bg-[#0a0d14] border border-clan-border rounded-xl pl-10 pr-4 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-clan-orange font-rajdhani font-medium transition-colors"
-            />
+          {/* Selector de Modo: Semanal vs Mensual + Buscador */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+            {/* Pestañas de modo */}
+            <div className="inline-flex p-1 bg-[#090c12] rounded-xl border border-clan-border shrink-0">
+              <button
+                onClick={() => setViewMode('semanal')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-orbitron font-bold text-xs transition-all ${
+                  viewMode === 'semanal'
+                    ? 'bg-gradient-to-r from-clan-orange to-clan-red text-black shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Flame className="w-3.5 h-3.5" />
+                Semanal
+              </button>
+              <button
+                onClick={() => setViewMode('mensual')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-lg font-orbitron font-bold text-xs transition-all ${
+                  viewMode === 'mensual'
+                    ? 'bg-gradient-to-r from-clan-orange to-clan-red text-black shadow-md'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <Calendar className="w-3.5 h-3.5" />
+                Mensual
+              </button>
+            </div>
+
+            {/* Selector de Mes (solo visible en modo mensual) */}
+            {viewMode === 'mensual' && availableMonths.length > 0 && (
+              <div className="relative">
+                <select
+                  value={activeMonthKey}
+                  onChange={(e) => setSelectedMonthKey(e.target.value)}
+                  className="w-full sm:w-auto bg-[#090c12] border border-clan-orange/50 text-white rounded-xl px-3.5 py-2 font-rajdhani font-bold text-xs focus:outline-none focus:border-clan-orange cursor-pointer appearance-none pr-8"
+                >
+                  {availableMonths.map(m => (
+                    <option key={m.key} value={m.key} className="bg-[#0f141f] text-white">
+                      {m.label}
+                    </option>
+                  ))}
+                </select>
+                <ChevronDown className="w-3.5 h-3.5 text-clan-orange absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            )}
+
+            {/* Buscador de miembros */}
+            <div className="relative w-full sm:w-60">
+              <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+              <input
+                type="text"
+                placeholder="Buscar por apodo o ID..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full bg-[#0a0d14] border border-clan-border rounded-xl pl-9 pr-3 py-2 text-xs sm:text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-clan-orange font-rajdhani font-medium transition-colors"
+              />
+            </div>
           </div>
         </div>
+
+        {/* Barra Informativa del Acumulado Mensual */}
+        {viewMode === 'mensual' && (
+          <div className="mb-6 p-4 rounded-xl bg-gradient-to-r from-amber-500/10 via-clan-surface to-clan-surface border border-amber-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center gap-3">
+              <div className="w-9 h-9 rounded-lg bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-yellow-400 shrink-0">
+                <Sparkles className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="font-orbitron font-bold text-sm text-white block">
+                  Ranking Acumulado — {activeMonthObj?.label}
+                </span>
+                <span className="text-xs font-rajdhani text-slate-300 font-semibold">
+                  Suma automática de las {weeksInActiveMonth.length} semanas registradas en este mes.
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 self-start sm:self-auto bg-[#0a0d14] px-3.5 py-1.5 rounded-lg border border-clan-border">
+              <span className="text-xs font-rajdhani text-slate-400 font-bold uppercase">Total del Clan:</span>
+              <span className="font-orbitron font-black text-sm text-yellow-300">
+                {totalClanHonors.toLocaleString('es-MX')}
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Tabla / Lista de Honores */}
         {filteredRecords.length > 0 ? (
           <div className="space-y-3">
             {filteredRecords.map((record, index) => {
               const member = memberMap.get(record.memberId);
-              const isTopThree = index < 3;
 
               return (
                 <div
@@ -138,6 +316,11 @@ export default function WeeklyHonors({ currentWeek, members }) {
                           {record.memberName}
                         </span>
                         {member && getRoleBadge(member.role)}
+                        {viewMode === 'mensual' && record.weeksCount !== undefined && (
+                          <span className="text-[10px] font-rajdhani font-bold px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/30 text-amber-400">
+                            {record.weeksCount} {record.weeksCount === 1 ? 'semana' : 'semanas'}
+                          </span>
+                        )}
                       </div>
 
                       {member?.gameId && (
@@ -164,14 +347,14 @@ export default function WeeklyHonors({ currentWeek, members }) {
                     </div>
                   </div>
 
-                  {/* Honores de la Semana (Número Único) */}
+                  {/* Honores del Miembro */}
                   <div className="flex items-center justify-between sm:justify-end gap-3 pt-3 sm:pt-0 border-t sm:border-t-0 border-clan-border/50">
                     <span className="text-xs font-rajdhani uppercase tracking-wider text-slate-400 font-bold sm:hidden">
-                      Honores Semanales:
+                      {viewMode === 'mensual' ? 'Total Mensual:' : 'Honores Semanales:'}
                     </span>
                     <div className="text-right">
                       <div className="text-xs font-rajdhani uppercase tracking-wider text-slate-400 font-bold hidden sm:block">
-                        Honores
+                        {viewMode === 'mensual' ? 'Total Mes' : 'Honores'}
                       </div>
                       <div className={`font-orbitron font-black text-xl sm:text-2xl ${
                         index === 0 ? 'text-yellow-300' : index === 1 ? 'text-slate-200' : index === 2 ? 'text-amber-400' : 'text-clan-orange'
@@ -190,7 +373,11 @@ export default function WeeklyHonors({ currentWeek, members }) {
             <Trophy className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="font-orbitron font-bold text-lg text-slate-300">No se encontraron registros</h3>
             <p className="text-sm font-rajdhani text-slate-500 mt-1">
-              {searchTerm ? "No hay miembros que coincidan con la búsqueda." : "El administrador aún no ha cargado honores para esta semana."}
+              {searchTerm 
+                ? "No hay miembros que coincidan con la búsqueda." 
+                : (viewMode === 'mensual'
+                    ? "Aún no hay semanas registradas con honores para este mes."
+                    : "El administrador aún no ha cargado honores para esta semana.")}
             </p>
           </div>
         )}
