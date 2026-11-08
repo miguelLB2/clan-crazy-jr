@@ -185,16 +185,37 @@ export const deleteMember = async (idOrGameId) => {
 // 3. SEMANAS Y REGISTRO DE HONORES
 // ==========================================
 export const getWeeks = async () => {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('weeks')
     .select('*')
-    .order('startDate', { ascending: false });
+    .order('created_at', { ascending: false });
 
   if (error) console.error('Error al obtener semanas:', error);
-  return data || [];
+  return (data || []).map(w => {
+    let recs = [];
+    if (Array.isArray(w.records)) {
+      recs = w.records;
+    } else if (w.records && typeof w.records === 'object') {
+      recs = Object.entries(w.records).map(([mId, h]) => ({
+        memberId: mId,
+        honors: Number(h) || 0
+      }));
+    }
+    return {
+      ...w,
+      id: w.id,
+      title: w.title || '',
+      startDate: w.start_date || w.startDate || '',
+      endDate: w.end_date || w.endDate || '',
+      isCurrent: w.is_current !== undefined ? Boolean(w.is_current) : Boolean(w.isCurrent),
+      records: recs
+    };
+  });
 };
 
 export const getCurrentWeek = async () => {
+  if (!supabase) return null;
   const { data, error } = await supabase
     .from('weeks')
     .select('*')
@@ -202,36 +223,169 @@ export const getCurrentWeek = async () => {
     .maybeSingle();
 
   if (error) console.error('Error al obtener semana actual:', error);
-  return data;
+  if (data) {
+    return {
+      ...data,
+      id: data.id,
+      title: data.title || '',
+      startDate: data.start_date || data.startDate || '',
+      endDate: data.end_date || data.endDate || '',
+      isCurrent: true,
+      records: Array.isArray(data.records) ? data.records : []
+    };
+  }
+  return null;
 };
 
-export const createWeek = async (title, startDate, endDate) => {
-  await supabase.from('weeks').update({ is_current: false }).neq('id', 0);
+export const addWeek = async (weekDataOrTitle, startDate, endDate, isCurrent = false, records = []) => {
+  let title = weekDataOrTitle;
+  let start = startDate || '';
+  let end = endDate || '';
+  let current = Boolean(isCurrent);
+  let recs = records || [];
+
+  if (typeof weekDataOrTitle === 'object' && weekDataOrTitle !== null) {
+    title = weekDataOrTitle.title || '';
+    start = weekDataOrTitle.startDate || weekDataOrTitle.start_date || '';
+    end = weekDataOrTitle.endDate || weekDataOrTitle.end_date || '';
+    current = weekDataOrTitle.isCurrent !== undefined ? Boolean(weekDataOrTitle.isCurrent) : Boolean(weekDataOrTitle.is_current);
+    recs = weekDataOrTitle.records || [];
+  }
+
+  const payload = {
+    title,
+    start_date: start,
+    end_date: end,
+    is_current: current,
+    records: Array.isArray(recs) ? recs : []
+  };
+
+  if (!supabase) {
+    return {
+      id: 'w_' + Date.now(),
+      title,
+      startDate: start,
+      endDate: end,
+      isCurrent: current,
+      records: payload.records
+    };
+  }
+
+  if (current) {
+    try {
+      await supabase.from('weeks').update({ is_current: false }).neq('title', '___none___');
+    } catch (e) {
+      console.warn('Error al desactivar semana previa:', e);
+    }
+  }
 
   const { data, error } = await supabase
     .from('weeks')
-    .insert([{ title, startDate, endDate, is_current: true, records: {} }])
+    .insert([payload])
     .select();
 
-  if (error) console.error('Error al crear nueva semana:', error);
-  return data;
+  if (error) {
+    console.error('Error al crear nueva semana en Supabase:', error);
+    return {
+      id: 'w_' + Date.now(),
+      title,
+      startDate: start,
+      endDate: end,
+      isCurrent: current,
+      records: payload.records
+    };
+  }
+
+  const row = (data && data[0]) ? data[0] : null;
+  if (row) {
+    return {
+      ...row,
+      id: row.id,
+      title: row.title,
+      startDate: row.start_date || row.startDate || start,
+      endDate: row.end_date || row.endDate || end,
+      isCurrent: row.is_current !== undefined ? Boolean(row.is_current) : current,
+      records: Array.isArray(row.records) ? row.records : payload.records
+    };
+  }
+  return {
+    id: 'w_' + Date.now(),
+    title,
+    startDate: start,
+    endDate: end,
+    isCurrent: current,
+    records: payload.records
+  };
 };
 
-export const addWeek = createWeek;
-export const saveWeek = createWeek;
+export const createWeek = addWeek;
+export const saveWeek = addWeek;
 
 export const updateWeek = async (id, updates) => {
+  const dbUpdates = {};
+  if (updates.title !== undefined) dbUpdates.title = updates.title;
+  if (updates.startDate !== undefined) dbUpdates.start_date = updates.startDate;
+  if (updates.start_date !== undefined) dbUpdates.start_date = updates.start_date;
+  if (updates.endDate !== undefined) dbUpdates.end_date = updates.endDate;
+  if (updates.end_date !== undefined) dbUpdates.end_date = updates.end_date;
+  if (updates.isCurrent !== undefined) dbUpdates.is_current = Boolean(updates.isCurrent);
+  if (updates.is_current !== undefined) dbUpdates.is_current = Boolean(updates.is_current);
+  if (updates.records !== undefined) dbUpdates.records = Array.isArray(updates.records) ? updates.records : [];
+
+  if (!supabase) {
+    return {
+      id,
+      ...updates,
+      startDate: updates.startDate || updates.start_date || '',
+      endDate: updates.endDate || updates.end_date || '',
+      isCurrent: updates.isCurrent !== undefined ? Boolean(updates.isCurrent) : Boolean(updates.is_current),
+      records: Array.isArray(updates.records) ? updates.records : []
+    };
+  }
+
+  if (dbUpdates.is_current) {
+    try {
+      await supabase.from('weeks').update({ is_current: false }).neq('id', id);
+    } catch (e) {
+      console.warn('Error al desactivar semana previa:', e);
+    }
+  }
+
   const { data, error } = await supabase
     .from('weeks')
-    .update(updates)
+    .update(dbUpdates)
     .eq('id', id)
     .select();
 
-  if (error) console.error('Error al actualizar semana:', error);
-  return data;
+  if (error) {
+    console.error('Error al actualizar semana en Supabase:', error);
+    return {
+      id,
+      ...updates,
+      startDate: updates.startDate || updates.start_date || '',
+      endDate: updates.endDate || updates.end_date || '',
+      isCurrent: updates.isCurrent !== undefined ? Boolean(updates.isCurrent) : Boolean(updates.is_current),
+      records: Array.isArray(updates.records) ? updates.records : []
+    };
+  }
+
+  const row = (data && data[0]) ? data[0] : null;
+  if (row) {
+    return {
+      ...row,
+      id: row.id || id,
+      title: row.title || updates.title,
+      startDate: row.start_date || row.startDate || updates.startDate,
+      endDate: row.end_date || row.endDate || updates.endDate,
+      isCurrent: row.is_current !== undefined ? Boolean(row.is_current) : Boolean(updates.isCurrent),
+      records: Array.isArray(row.records) ? row.records : (Array.isArray(updates.records) ? updates.records : [])
+    };
+  }
+  return { id, ...updates, records: Array.isArray(updates.records) ? updates.records : [] };
 };
 
 export const deleteWeek = async (id) => {
+  if (!supabase) return;
   const { error } = await supabase
     .from('weeks')
     .delete()
@@ -241,14 +395,7 @@ export const deleteWeek = async (id) => {
 };
 
 export const updateWeekHonors = async (weekId, updatedRecords) => {
-  const { data, error } = await supabase
-    .from('weeks')
-    .update({ records: updatedRecords })
-    .eq('id', weekId)
-    .select();
-
-  if (error) console.error('Error al actualizar honores de la semana:', error);
-  return data;
+  return await updateWeek(weekId, { records: updatedRecords });
 };
 
 // ==========================================
@@ -259,23 +406,24 @@ export const getMonthlyHonors = async (year, month) => {
   const members = await getMembers();
 
   const filteredWeeks = weeks.filter((w) => {
-    const d = new Date(w.startDate);
+    const d = new Date(w.startDate || w.start_date);
     return d.getFullYear() === year && d.getMonth() + 1 === month;
   });
 
   const totals = {};
   members.forEach((m) => {
-    totals[m.game_id] = {
+    totals[m.game_id || m.gameId] = {
       member: m,
       totalHonors: 0,
     };
   });
 
   filteredWeeks.forEach((week) => {
-    const records = week.records || {};
-    Object.keys(records).forEach((game_id) => {
-      if (totals[game_id]) {
-        totals[game_id].totalHonors += Number(records[game_id]) || 0;
+    const records = Array.isArray(week.records) ? week.records : [];
+    records.forEach((r) => {
+      const gId = r.gameId || r.game_id || r.memberId;
+      if (totals[gId]) {
+        totals[gId].totalHonors += Number(r.honors) || 0;
       }
     });
   });
@@ -287,39 +435,96 @@ export const getMonthlyHonors = async (year, month) => {
 // 5. PREMIOS Y RECONOCIMIENTOS (AWARDS)
 // ==========================================
 export const getAwards = async () => {
+  if (!supabase) return [];
   const { data, error } = await supabase
     .from('awards')
     .select('*')
     .order('created_at', { ascending: false });
 
   if (error) console.error('Error al obtener premios:', error);
-  return data || [];
+  return (data || []).map(a => ({
+    ...a,
+    winnerName: a.winnerName || a.winner_name || '',
+    dateOrPeriod: a.dateOrPeriod || a.date_or_period || ''
+  }));
 };
 
 export const addAward = async (awardData) => {
+  const payload = {
+    title: awardData.title,
+    description: awardData.description || '',
+    winner_name: awardData.winnerName || awardData.winner_name || '',
+    icon: awardData.icon || 'Trophy',
+    date_or_period: awardData.dateOrPeriod || awardData.date_or_period || ''
+  };
+
+  if (!supabase) {
+    return { id: 'a_' + Date.now(), ...awardData, ...payload };
+  }
+
   const { data, error } = await supabase
     .from('awards')
-    .insert([awardData])
+    .insert([payload])
     .select();
 
-  if (error) console.error('Error al otorgar premio:', error);
-  return data;
+  if (error) {
+    console.error('Error al otorgar premio en Supabase:', error);
+    return { id: 'a_' + Date.now(), ...awardData };
+  }
+
+  const row = (data && data[0]) ? data[0] : null;
+  if (row) {
+    return {
+      ...row,
+      id: row.id || ('a_' + Date.now()),
+      winnerName: row.winner_name || row.winnerName || '',
+      dateOrPeriod: row.date_or_period || row.dateOrPeriod || ''
+    };
+  }
+  return { id: 'a_' + Date.now(), ...awardData };
 };
 
 export const saveAward = addAward;
 
 export const updateAward = async (id, updates) => {
+  const dbUpdates = {};
+  if (updates.title !== undefined) dbUpdates.title = updates.title;
+  if (updates.description !== undefined) dbUpdates.description = updates.description;
+  if (updates.winnerName !== undefined) dbUpdates.winner_name = updates.winnerName;
+  if (updates.winner_name !== undefined) dbUpdates.winner_name = updates.winner_name;
+  if (updates.icon !== undefined) dbUpdates.icon = updates.icon;
+  if (updates.dateOrPeriod !== undefined) dbUpdates.date_or_period = updates.dateOrPeriod;
+  if (updates.date_or_period !== undefined) dbUpdates.date_or_period = updates.date_or_period;
+
+  if (!supabase) {
+    return { id, ...updates };
+  }
+
   const { data, error } = await supabase
     .from('awards')
-    .update(updates)
+    .update(dbUpdates)
     .eq('id', id)
     .select();
 
-  if (error) console.error('Error al actualizar premio:', error);
-  return data;
+  if (error) {
+    console.error('Error al actualizar premio en Supabase:', error);
+    return { id, ...updates };
+  }
+
+  const row = (data && data[0]) ? data[0] : null;
+  if (row) {
+    return {
+      ...row,
+      id: row.id || id,
+      winnerName: row.winner_name || row.winnerName || '',
+      dateOrPeriod: row.date_or_period || row.dateOrPeriod || ''
+    };
+  }
+  return { id, ...updates };
 };
 
 export const deleteAward = async (id) => {
+  if (!supabase) return;
   const { error } = await supabase
     .from('awards')
     .delete()

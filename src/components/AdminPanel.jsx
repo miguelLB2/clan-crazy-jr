@@ -160,15 +160,17 @@ export default function AdminPanel({
   // Cargar inputs de honores cuando cambia la semana seleccionada
   useEffect(() => {
     if (!captureWeekId || !weeks) return;
-    const currentWeekObj = weeks.find(w => w.id === captureWeekId);
+    const currentWeekObj = (weeks || []).filter(Boolean).find(w => w.id === captureWeekId);
     if (currentWeekObj) {
       const inputs = {};
-      // Llenar con lo que ya tenga la semana
-      (currentWeekObj.records || []).forEach(r => {
-        inputs[r.memberId] = r.honors;
+      const recs = Array.isArray(currentWeekObj.records) ? currentWeekObj.records : [];
+      recs.forEach(r => {
+        if (r && r.memberId) {
+          inputs[r.memberId] = r.honors;
+        }
       });
       // Asegurar que los miembros que no estén en records tengan 0
-      (members || []).forEach(m => {
+      (members || []).filter(Boolean).forEach(m => {
         if (inputs[m.id] === undefined) {
           inputs[m.id] = 0;
         }
@@ -224,36 +226,46 @@ export default function AdminPanel({
     e.preventDefault();
     if (!weekForm.title.trim()) return;
 
-    if (editingWeek) {
-      const updated = await updateWeek(editingWeek.id, {
-        ...editingWeek,
-        title: weekForm.title,
-        startDate: weekForm.startDate,
-        endDate: weekForm.endDate,
-        isCurrent: weekForm.isCurrent
-      });
-      setWeeks(prev => prev.map(w => w.id === updated.id ? updated : (weekForm.isCurrent ? { ...w, isCurrent: false } : w)));
-      showToast('Semana actualizada con éxito');
-    } else {
-      // Crear nueva semana con records iniciales en 0 para cada miembro actual
-      const initialRecords = (members || []).map(m => ({
-        memberId: m.id,
-        memberName: m.name,
-        honors: 0
-      }));
-      const created = await addWeek({
-        title: weekForm.title,
-        startDate: weekForm.startDate,
-        endDate: weekForm.endDate,
-        isCurrent: weekForm.isCurrent,
-        records: initialRecords
-      });
-      setWeeks(prev => {
-        const list = weekForm.isCurrent ? prev.map(w => ({ ...w, isCurrent: false })) : [...prev];
-        return [created, ...list];
-      });
-      setCaptureWeekId(created.id);
-      showToast('Nueva semana creada con éxito');
+    try {
+      if (editingWeek) {
+        const updated = await updateWeek(editingWeek.id, {
+          ...editingWeek,
+          title: weekForm.title,
+          startDate: weekForm.startDate,
+          endDate: weekForm.endDate,
+          isCurrent: weekForm.isCurrent
+        });
+        if (updated) {
+          setWeeks(prev => (prev || []).filter(Boolean).map(w => w.id === (updated.id || editingWeek.id) ? updated : (weekForm.isCurrent ? { ...w, isCurrent: false } : w)));
+          showToast('Semana actualizada con éxito');
+        }
+      } else {
+        const initialRecords = (members || []).filter(Boolean).map(m => ({
+          memberId: m.id,
+          memberName: m.name,
+          honors: 0
+        }));
+        const created = await addWeek({
+          title: weekForm.title,
+          startDate: weekForm.startDate,
+          endDate: weekForm.endDate,
+          isCurrent: weekForm.isCurrent,
+          records: initialRecords
+        });
+        if (created) {
+          setWeeks(prev => {
+            const list = weekForm.isCurrent ? (prev || []).filter(Boolean).map(w => ({ ...w, isCurrent: false })) : [...(prev || []).filter(Boolean)];
+            return [created, ...list];
+          });
+          if (created.id) {
+            setCaptureWeekId(created.id);
+          }
+          showToast('Nueva semana creada con éxito');
+        }
+      }
+    } catch (err) {
+      console.error('Error al guardar semana:', err);
+      alert('Error al guardar semana: ' + err.message);
     }
 
     setShowWeekModal(false);
@@ -261,48 +273,72 @@ export default function AdminPanel({
 
   const handleDeleteWeek = async (id) => {
     if (!window.confirm('¿Estás seguro de eliminar esta semana y todos sus honores registrados?')) return;
-    await deleteWeek(id);
-    setWeeks(prev => prev.filter(w => w.id !== id));
-    showToast('Semana eliminada');
+    try {
+      await deleteWeek(id);
+      setWeeks(prev => (prev || []).filter(Boolean).filter(w => w.id !== id));
+      showToast('Semana eliminada');
+    } catch (err) {
+      alert('Error al eliminar: ' + err.message);
+    }
   };
 
   const handleToggleCurrentWeek = async (week) => {
-    const updated = await updateWeek(week.id, { ...week, isCurrent: true });
-    setWeeks(prev => prev.map(w => w.id === updated.id ? { ...w, isCurrent: true } : { ...w, isCurrent: false }));
-    setCaptureWeekId(week.id);
-    showToast(`"${week.title}" establecida como semana actual`);
+    try {
+      const updated = await updateWeek(week.id, { ...week, isCurrent: true });
+      if (updated) {
+        setWeeks(prev => (prev || []).filter(Boolean).map(w => w.id === (updated.id || week.id) ? { ...w, ...updated, isCurrent: true } : { ...w, isCurrent: false }));
+        setCaptureWeekId(week.id);
+        showToast(`"${week.title}" establecida como semana actual`);
+      }
+    } catch (err) {
+      console.error('Error:', err);
+    }
   };
 
   // ==================== MANEJADOR DE CAPTURA DE HONORES ====================
   const handleSaveAllHonors = async () => {
-    if (!captureWeekId) return;
-    const currentWeekObj = weeks.find(w => w.id === captureWeekId);
-    if (!currentWeekObj) return;
+    if (!captureWeekId) {
+      alert('Por favor selecciona una semana.');
+      return;
+    }
+    const currentWeekObj = (weeks || []).filter(Boolean).find(w => w.id === captureWeekId);
+    if (!currentWeekObj) {
+      alert('No se encontró la semana seleccionada.');
+      return;
+    }
 
     setIsSavingHonors(true);
 
-    // Crear lista de records combinando miembros con los honores capturados
-    const records = (members || []).map(m => {
-      const value = honorInputs[m.id];
-      const honorsNumber = Number(value) || 0;
-      return {
-        memberId: m.id,
-        memberName: m.name,
-        honors: honorsNumber
-      };
-    });
+    try {
+      // Crear lista de records combinando miembros con los honores capturados
+      const records = (members || []).filter(Boolean).map(m => {
+        const value = honorInputs[m.id];
+        const honorsNumber = Number(value) || 0;
+        return {
+          memberId: m.id,
+          memberName: m.name,
+          honors: honorsNumber
+        };
+      });
 
-    // Ordenar de mayor a menor honor automáticamente
-    records.sort((a, b) => b.honors - a.honors);
+      // Ordenar de mayor a menor honor automáticamente
+      records.sort((a, b) => b.honors - a.honors);
 
-    const updated = await updateWeek(captureWeekId, {
-      ...currentWeekObj,
-      records
-    });
+      const updated = await updateWeek(captureWeekId, {
+        ...currentWeekObj,
+        records
+      });
 
-    setWeeks(prev => prev.map(w => w.id === updated.id ? updated : w));
-    setIsSavingHonors(false);
-    showToast('¡Honores guardados y ranking calculado con éxito!');
+      if (updated) {
+        setWeeks(prev => (prev || []).filter(Boolean).map(w => w.id === (updated.id || captureWeekId) ? updated : w));
+        showToast('¡Honores guardados y ranking calculado con éxito!');
+      }
+    } catch (err) {
+      console.error('Error al guardar honores:', err);
+      alert('Error al guardar honores: ' + err.message);
+    } finally {
+      setIsSavingHonors(false);
+    }
   };
 
   // ==================== MANEJADORES DE MIEMBROS ====================
@@ -645,7 +681,7 @@ export default function AdminPanel({
                       onChange={(e) => setCaptureWeekId(e.target.value)}
                       className="bg-[#090c12] border border-clan-orange/50 text-white rounded-xl px-4 py-2 font-rajdhani font-bold text-sm focus:outline-none focus:border-clan-orange cursor-pointer appearance-none pr-9"
                     >
-                      {weeks.map(w => (
+                      {(weeks || []).filter(Boolean).map(w => (
                         <option key={w.id} value={w.id}>
                           {w.title} {w.isCurrent ? '★ (Activa)' : ''}
                         </option>
@@ -665,10 +701,10 @@ export default function AdminPanel({
               </div>
 
               {/* Formulario / Tabla de Miembros para capturar honores */}
-              {members.length > 0 ? (
+              {(members || []).filter(Boolean).length > 0 ? (
                 <div className="mt-6">
                   <div className="space-y-2.5 max-h-[500px] overflow-y-auto pr-1">
-                    {members.map((member, idx) => (
+                    {(members || []).filter(Boolean).map((member, idx) => (
                       <div
                         key={member.id}
                         className="p-3 sm:p-4 rounded-xl bg-[#0a0d14] border border-clan-border hover:border-clan-orange/40 flex items-center justify-between gap-3 transition-colors"
@@ -769,7 +805,7 @@ export default function AdminPanel({
               </div>
 
               <div className="space-y-3">
-                {weeks.map(w => (
+                {(weeks || []).filter(Boolean).map(w => (
                   <div
                     key={w.id}
                     className="p-4 rounded-xl bg-[#0a0d14] border border-clan-border flex flex-col sm:flex-row sm:items-center justify-between gap-3"

@@ -8,10 +8,11 @@ export default function WeeklyHonors({ currentWeek, members }) {
   // Mapa de miembros para obtener Free Fire ID y Rol rápidamente
   const memberMap = new Map((members || []).map(m => [m.id, m]));
 
-  const records = currentWeek?.records || [];
+  const records = Array.isArray(currentWeek?.records) ? currentWeek.records : [];
 
   // Filtrar por término de búsqueda
   const filteredRecords = records.filter(r => {
+    if (!r) return false;
     const member = memberMap.get(r.memberId);
     const search = searchTerm.toLowerCase();
     const nameMatch = r.memberName?.toLowerCase().includes(search);

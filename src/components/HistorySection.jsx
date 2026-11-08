@@ -6,11 +6,11 @@ export default function HistorySection({ weeks, members }) {
   const [selectedWeekId, setSelectedWeekId] = useState(weeks && weeks.length > 1 ? weeks[1].id : (weeks?.[0]?.id || ''));
 
   // Asegurar que si cambia la lista de semanas, se seleccione una válida
-  const currentSelectedWeek = (weeks || []).find(w => w.id === selectedWeekId) || weeks?.[0];
+  const currentSelectedWeek = (weeks || []).filter(Boolean).find(w => w.id === selectedWeekId) || (weeks || []).filter(Boolean)[0];
 
-  const memberMap = new Map((members || []).map(m => [m.id, m]));
+  const memberMap = new Map((members || []).filter(Boolean).map(m => [m.id, m]));
 
-  const records = currentSelectedWeek?.records || [];
+  const records = Array.isArray(currentSelectedWeek?.records) ? currentSelectedWeek.records : [];
 
   return (
     <section id="historial" className="py-16 sm:py-20 relative">
@@ -56,7 +56,7 @@ export default function HistorySection({ weeks, members }) {
                   onChange={(e) => setSelectedWeekId(e.target.value)}
                   className="w-full sm:w-72 bg-[#090c12] border border-clan-orange/50 text-white rounded-xl px-4 py-2.5 font-rajdhani font-bold text-sm focus:outline-none focus:border-clan-orange focus:ring-1 focus:ring-clan-orange cursor-pointer appearance-none pr-10"
                 >
-                  {weeks.map((w) => (
+                  {(weeks || []).filter(Boolean).map((w) => (
                     <option key={w.id} value={w.id} className="bg-[#0f141f] text-slate-200 py-1">
                       {w.title} {w.isCurrent ? '★ (Actual)' : ''}
                     </option>
