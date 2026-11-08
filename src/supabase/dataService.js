@@ -69,7 +69,6 @@ export const getMembers = async () => {
 };
 
 export const addMember = async (nameOrObj, game_id, role = 'Miembro', avatar_url = '') => {
-  if (!supabase) return null;
   const isObj = typeof nameOrObj === 'object' && nameOrObj !== null;
   const name = isObj ? nameOrObj.name : nameOrObj;
   const gameIdVal = isObj ? (nameOrObj.gameId || nameOrObj.game_id || '') : (game_id || '');
@@ -83,27 +82,52 @@ export const addMember = async (nameOrObj, game_id, role = 'Miembro', avatar_url
     avatar_url: avatarVal
   };
 
+  if (!supabase) {
+    return {
+      id: 'm_' + Date.now(),
+      name,
+      gameId: gameIdVal,
+      role: roleVal,
+      avatarUrl: avatarVal,
+      fecha: new Date().toISOString()
+    };
+  }
+
   const { data, error } = await supabase
     .from('members')
     .insert([payload])
     .select();
 
-  if (error) console.error('Error al agregar miembro:', error);
-  const row = (data && data[0]) ? data[0] : data;
+  if (error) {
+    console.error('Error al agregar miembro en Supabase:', error);
+    return {
+      id: 'm_' + Date.now(),
+      name,
+      gameId: gameIdVal,
+      role: roleVal,
+      avatarUrl: avatarVal,
+      fecha: new Date().toISOString()
+    };
+  }
+
+  const row = (data && data[0]) ? data[0] : null;
   if (row) {
     return {
       ...row,
+      id: row.id || ('m_' + Date.now()),
       gameId: row.game_id || row.gameId || '',
       avatarUrl: row.avatar_url || row.avatarUrl || ''
     };
   }
-  return { id: Date.now(), ...payload, gameId: gameIdVal, avatarUrl: avatarVal };
+  return { id: 'm_' + Date.now(), ...payload, gameId: gameIdVal, avatarUrl: avatarVal };
 };
 
 export const saveMember = addMember;
 
 export const updateMember = async (idOrGameId, updates) => {
-  if (!supabase) return null;
+  if (!supabase) {
+    return { id: idOrGameId, ...updates, gameId: updates.gameId || updates.game_id || '' };
+  }
   const dbUpdates = { ...updates };
   if (dbUpdates.gameId !== undefined) {
     dbUpdates.game_id = dbUpdates.gameId;
@@ -128,11 +152,15 @@ export const updateMember = async (idOrGameId, updates) => {
     error = res.error;
   }
 
-  if (error) console.error('Error al actualizar miembro:', error);
-  const row = (data && data[0]) ? data[0] : data;
+  if (error) {
+    console.error('Error al actualizar miembro:', error);
+    return { id: idOrGameId, ...updates };
+  }
+  const row = (data && data[0]) ? data[0] : null;
   if (row) {
     return {
       ...row,
+      id: row.id || idOrGameId,
       gameId: row.game_id || row.gameId || '',
       avatarUrl: row.avatar_url || row.avatarUrl || ''
     };

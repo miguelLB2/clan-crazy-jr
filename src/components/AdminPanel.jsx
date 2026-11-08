@@ -331,21 +331,30 @@ export default function AdminPanel({
     e.preventDefault();
     if (!memberForm.name.trim()) return;
 
-    if (editingMember) {
-      const updated = await updateMember(editingMember.id, memberForm);
-      setMembers(prev => prev.map(m => m.id === updated.id ? updated : m));
-      // Actualizar nombre también en records de semanas en memoria
-      setWeeks(prev => prev.map(w => ({
-        ...w,
-        records: (w.records || []).map(r => r.memberId === updated.id ? { ...r, memberName: updated.name } : r)
-      })));
-      showToast('Miembro actualizado');
-    } else {
-      const created = await addMember(memberForm);
-      setMembers(prev => [...prev, created]);
-      // Añadir al formulario de honores activo
-      setHonorInputs(prev => ({ ...prev, [created.id]: 0 }));
-      showToast('Miembro agregado');
+    try {
+      if (editingMember) {
+        const updated = await updateMember(editingMember.id, memberForm);
+        if (updated) {
+          setMembers(prev => (prev || []).filter(Boolean).map(m => m.id === (updated.id || editingMember.id) ? updated : m));
+          setWeeks(prev => (prev || []).map(w => ({
+            ...w,
+            records: (w.records || []).map(r => r.memberId === (updated.id || editingMember.id) ? { ...r, memberName: updated.name } : r)
+          })));
+          showToast('Miembro actualizado');
+        }
+      } else {
+        const created = await addMember(memberForm);
+        if (created) {
+          setMembers(prev => [...(prev || []).filter(Boolean).filter(m => m.id !== created.id), created]);
+          if (created.id) {
+            setHonorInputs(prev => ({ ...prev, [created.id]: 0 }));
+          }
+          showToast('Miembro agregado');
+        }
+      }
+    } catch (err) {
+      console.error('Error al guardar miembro:', err);
+      alert('Error al guardar: ' + err.message);
     }
 
     setShowMemberModal(false);
@@ -835,8 +844,8 @@ export default function AdminPanel({
             </div>
 
            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {members && members.length > 0 ? (
-                    members.map((m) => (
+                  {members && members.filter(Boolean).length > 0 ? (
+                    members.filter(Boolean).map((m) => (
                       <div
                         key={m.id}
                         className="p-4 rounded-xl bg-[#0e0d14] border border-clan-border flex items-center justify-between gap-3 group"
